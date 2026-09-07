@@ -6,13 +6,17 @@ import ServiceManagement
 struct KubeLensApp: App {
     @StateObject private var store = KubeStore()
     @AppStorage("showContextInMenuBar") private var showContextInMenuBar = true
+    @AppStorage("appearance") private var appearance = AppAppearance.system.rawValue
     @Environment(\.openWindow) private var openWindow
+
+    init() { AppAppearance.apply(.current) }
 
     var body: some Scene {
         Window("KubeLens", id: "main") {
             MainView()
                 .environmentObject(store)
                 .frame(minWidth: 900, minHeight: 520)
+                .onChange(of: appearance) { _, v in AppAppearance.apply(AppAppearance(rawValue: v) ?? .system) }
         }
         .defaultSize(width: 1100, height: 680)
         .commands {
@@ -87,6 +91,16 @@ struct MenuBarContent: View {
         }
 
         Divider()
+        Menu("Тема") {
+            ForEach(AppAppearance.allCases) { a in
+                Button {
+                    UserDefaults.standard.set(a.rawValue, forKey: "appearance")
+                    AppAppearance.apply(a)
+                } label: {
+                    if a == AppAppearance.current { Label(a.title, systemImage: "checkmark") } else { Text(a.title) }
+                }
+            }
+        }
         if let current, Kubectl.shared.executable != nil {
             Button("Ресурсы кластера…") {
                 openWindow(id: "cluster", value: ClusterTarget(context: current.context.name, kubeconfig: store.kubeconfigEnv(for: current.file), namespace: current.context.namespace))
@@ -145,11 +159,23 @@ struct SettingsView: View {
     @AppStorage("maxBackups") private var maxBackups = 20
     @AppStorage("kubectlPath") private var kubectlPath = ""
     @AppStorage("refreshInterval") private var refreshInterval = 5.0
+    @AppStorage("appearance") private var appearance = AppAppearance.system.rawValue
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
     var body: some View {
         Form {
+            Section("Оформление") {
+                Picker("Тема", selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { a in
+                        Label(a.title, systemImage: a.icon).tag(a.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: appearance) { _, v in AppAppearance.apply(AppAppearance(rawValue: v) ?? .system) }
+                Text("«Как в системе» следует переключателю в Системных настройках → Внешний вид.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Строка меню") {
                 Toggle("Показывать имя текущего контекста", isOn: $showContextInMenuBar)
                 Toggle("Запускать при входе в систему", isOn: $launchAtLogin)
@@ -195,6 +221,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 540)
+        .frame(width: 520, height: 620)
     }
 }

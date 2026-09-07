@@ -32,6 +32,46 @@ enum Theme {
     }
 }
 
+/// Оформление окон: следовать системе или принудительно светлая/тёмная тема.
+/// Применяется к `NSApp.appearance`, поэтому действует на все окна сразу, включая уже открытые.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "Как в системе"
+        case .light: return "Светлая"
+        case .dark: return "Тёмная"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+
+    static var current: AppAppearance {
+        AppAppearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system
+    }
+
+    /// Вызывается при запуске и при смене настройки.
+    static func apply(_ value: AppAppearance) {
+        NSApp.appearance = value.nsAppearance
+    }
+}
+
 /// Бейдж состояния: точка и подпись на мягкой подложке — как в Rancher.
 struct StateBadge: View {
     let text: String
