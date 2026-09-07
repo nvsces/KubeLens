@@ -1,0 +1,9 @@
+.build/
+KubeLens.app/
+*.dmg
+.DS_Store
+.swiftpm/
+xcuserdata/
+KubeLens.xcodeproj/xcuserdata/
+KubeLens.xcodeproj/project.xcworkspace/xcuserdata/
+*.rt.yaml
