@@ -9,13 +9,13 @@ struct KubeLensApp: App {
     @AppStorage("appearance") private var appearance = AppAppearance.system.rawValue
     @Environment(\.openWindow) private var openWindow
 
-    init() { AppAppearance.apply(.current) }
 
     var body: some Scene {
         Window("KubeLens", id: "main") {
             MainView()
                 .environmentObject(store)
                 .frame(minWidth: 900, minHeight: 520)
+                .onAppear { AppAppearance.apply(.current) }
                 .onChange(of: appearance) { _, v in AppAppearance.apply(AppAppearance(rawValue: v) ?? .system) }
         }
         .defaultSize(width: 1100, height: 680)
@@ -27,7 +27,11 @@ struct KubeLensApp: App {
         }
 
         WindowGroup("Кластер", id: "cluster", for: ClusterTarget.self) { $target in
-            if let target { ClusterWindow(target: target).frame(minWidth: 1000, minHeight: 560) }
+            if let target {
+                ClusterWindow(target: target)
+                    .frame(minWidth: 1000, minHeight: 560)
+                    .onAppear { AppAppearance.apply(.current) }
+            }
         }
         .defaultSize(width: 1280, height: 760)
 

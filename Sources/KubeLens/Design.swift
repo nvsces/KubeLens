@@ -66,9 +66,15 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         AppAppearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system
     }
 
-    /// Вызывается при запуске и при смене настройки.
+    /// Применяет тему к приложению. `NSApp` появляется только после старта цикла событий,
+    /// поэтому до него откладываем — иначе обращение к нему в `App.init()` роняет запуск.
     static func apply(_ value: AppAppearance) {
-        NSApp.appearance = value.nsAppearance
+        guard let app = NSApplication.shared as NSApplication? else { return }
+        if Thread.isMainThread {
+            app.appearance = value.nsAppearance
+        } else {
+            DispatchQueue.main.async { app.appearance = value.nsAppearance }
+        }
     }
 }
 
