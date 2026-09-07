@@ -7,20 +7,63 @@ kubeconfig (кластеры, пользователи, импорт/экспо�
 
 ## Установка
 
-Скачайте `KubeLens-1.0.dmg` со [страницы релизов](https://github.com/nvsces/KubeLens/releases)
-и перетащите в «Программы». Требуется macOS 14.4+ (Apple Silicon и Intel — универсальный бинарник).
-Для окна ресурсов кластера нужен `kubectl` в PATH (или путь в настройках).
+Скачайте DMG со [страницы релизов](https://github.com/nvsces/KubeLens/releases) и перетащите
+в «Программы». Требуется macOS 14.4+ (Apple Silicon и Intel — универсальный бинарник).
 
 Приложение без окна в Dock (`LSUIElement`) — иконка-штурвал в строке меню с именем текущего контекста.
 Главное окно открывается из меню («Открыть KubeLens…», ⌘O) и при первом запуске.
 Автозапуск: Настройки → «Запускать при входе в систему».
 
+## kubectl
+
+Работа с файлами kubeconfig (контексты, кластеры, пользователи, импорт и экспорт) не требует
+ничего дополнительно. Для окна ресурсов кластера, списка namespaces и кнопки «Проверить связь»
+нужен `kubectl`: приложение запускает его как внешнюю команду.
+
+Проверьте, установлен ли он:
+
+```bash
+kubectl version --client
+```
+
+Если команда не найдена, поставьте одним из способов.
+
+**Homebrew** — если он у вас есть, это самый простой путь:
+
+```bash
+brew install kubectl
+```
+
+**Официальный бинарник от Kubernetes** — без Homebrew, ставится в `/usr/local/bin`:
+
+```bash
+# Apple Silicon (M1 и новее)
+curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/darwin/arm64/kubectl"
+# Intel
+curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/darwin/amd64/kubectl"
+
+chmod +x kubectl
+sudo mv kubectl /usr/local/bin/kubectl
+```
+
+**Вместе с Docker Desktop** — если он установлен, kubectl уже лежит в
+`/Applications/Docker.app/Contents/Resources/bin/kubectl`; включите Kubernetes в его настройках
+или просто укажите этот путь в настройках KubeLens.
+
+Приложение ищет `kubectl` в `PATH` вашего логин-шелла, а также в `/opt/homebrew/bin`,
+`/usr/local/bin` и `/usr/bin`. Если он лежит в другом месте (например, поставлен через `asdf`
+или `mise`), укажите полный путь в Настройки → «kubectl». Там же видно, найден ли он:
+строка «Найден: …» с путём или предупреждение.
+
+Версия kubectl должна отличаться от версии кластера не более чем на один минорный выпуск —
+это [требование самого Kubernetes](https://kubernetes.io/releases/version-skew-policy/).
+
 ## Сборка из исходников
 
 ```bash
 ./make_app.sh && open KubeLens.app          # локальная сборка, ad-hoc подпись
-./make_dmg.sh 1.0                            # DMG с Developer ID и нотаризацией
-./make_dmg.sh 1.0 --no-notarize              # только подпись
+./make_dmg.sh 0.1.1                          # DMG с Developer ID и нотаризацией
+./make_dmg.sh 0.1.1 --no-notarize            # только подпись
 python3 gen_project.py                       # пересобрать .xcodeproj после добавления файлов
 ```
 
@@ -109,7 +152,7 @@ namespace) → детали. В деталях:
 - Правки снаружи (kubectl, редактор, `aws eks update-kubeconfig`) подхватываются сразу.
 - `KUBECONFIG` и `PATH` читаются из логин-шелла (`$SHELL -ilc`), потому что GUI-приложения
   их не наследуют. Без kubectl работает всё, что касается файлов kubeconfig; окно ресурсов,
-  список namespaces и проверка связи требуют kubectl.
+  список namespaces и проверка связи требуют kubectl — см. раздел [kubectl](#kubectl).
 - YAML объектов кластера показывается своим эмиттером из JSON, а правки пользователя разбираются
   своим парсером и отдаются kubectl уже JSON-ом — серверный YAML приложению читать не нужно.
 - `KubeLens --cluster` при запуске сразу открывает окно ресурсов текущего контекста (для отладки).
