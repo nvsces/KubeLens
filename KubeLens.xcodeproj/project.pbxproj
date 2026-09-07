@@ -10,6 +10,7 @@
 		467079BD4BC55B47AAEE0A46 /* ClusterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F696D72B0AB520D871D7212 /* ClusterClient.swift */; };
 		FC3FB27063E85874BAD3CD68 /* ClusterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DFB50FDB237539EBA0203EA /* ClusterStore.swift */; };
 		8B6D91577E08554EB5010B98 /* ClusterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93DCDE38074E5D0B85E0D320 /* ClusterView.swift */; };
+		C276E0409E455054B9C92E50 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA1391A9CC05273A15A732F /* Design.swift */; };
 		8C61286795D05114BAEB247C /* DetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA205FF27D53514C8E6CD786 /* DetailViews.swift */; };
 		3A28DB8169A055FEB77D44C6 /* KubeLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D06E4182C1E45026BA40E5EC /* KubeLensApp.swift */; };
 		87919EF4E2005675876B190C /* KubeResources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8132B9CDE3B65F58ACE94505 /* KubeResources.swift */; };
@@ -26,6 +27,7 @@
 		2F696D72B0AB520D871D7212 /* ClusterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterClient.swift; sourceTree = "<group>"; };
 		5DFB50FDB237539EBA0203EA /* ClusterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterStore.swift; sourceTree = "<group>"; };
 		93DCDE38074E5D0B85E0D320 /* ClusterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterView.swift; sourceTree = "<group>"; };
+		EEA1391A9CC05273A15A732F /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		CA205FF27D53514C8E6CD786 /* DetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViews.swift; sourceTree = "<group>"; };
 		D06E4182C1E45026BA40E5EC /* KubeLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KubeLensApp.swift; sourceTree = "<group>"; };
 		8132B9CDE3B65F58ACE94505 /* KubeResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KubeResources.swift; sourceTree = "<group>"; };
@@ -65,6 +67,7 @@
 				2F696D72B0AB520D871D7212 /* ClusterClient.swift */,
 				5DFB50FDB237539EBA0203EA /* ClusterStore.swift */,
 				93DCDE38074E5D0B85E0D320 /* ClusterView.swift */,
+				EEA1391A9CC05273A15A732F /* Design.swift */,
 				CA205FF27D53514C8E6CD786 /* DetailViews.swift */,
 				D06E4182C1E45026BA40E5EC /* KubeLensApp.swift */,
 				8132B9CDE3B65F58ACE94505 /* KubeResources.swift */,
@@ -155,6 +158,7 @@
 				467079BD4BC55B47AAEE0A46 /* ClusterClient.swift in Sources */,
 				FC3FB27063E85874BAD3CD68 /* ClusterStore.swift in Sources */,
 				8B6D91577E08554EB5010B98 /* ClusterView.swift in Sources */,
+				C276E0409E455054B9C92E50 /* Design.swift in Sources */,
 				8C61286795D05114BAEB247C /* DetailViews.swift in Sources */,
 				3A28DB8169A055FEB77D44C6 /* KubeLensApp.swift in Sources */,
 				87919EF4E2005675876B190C /* KubeResources.swift in Sources */,

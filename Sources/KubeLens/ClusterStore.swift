@@ -9,7 +9,7 @@ final class ClusterStore: ObservableObject {
     let client: ClusterClient
 
     @Published var kind: ResourceKind = ResourceKind.all[0] { didSet { if kind != oldValue { kindChanged() } } }
-    @Published var namespace: String? { didSet { if namespace != oldValue { Task { await refresh() } } } }
+    @Published var namespace: String? { didSet { if namespace != oldValue { counts = [:]; Task { await refresh(); await loadCounts() } } } }
     @Published private(set) var namespaces: [String] = []
     @Published private(set) var items: [KResource] = []
     @Published var selection: KResource.ID?
@@ -21,6 +21,8 @@ final class ClusterStore: ObservableObject {
     @Published var forwards: [PortForward] = []
     @Published private(set) var lastRefresh: Date?
     @Published var busy: String?
+    /// Счётчики для сайдбара: сколько объектов каждого вида в текущем namespace.
+    @Published private(set) var counts: [String: Int] = [:]
 
     private var timer: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -36,6 +38,7 @@ final class ClusterStore: ObservableObject {
         Task {
             await loadNamespaces()
             await refresh()
+            await loadCounts()
         }
         startTimer()
     }
@@ -61,6 +64,17 @@ final class ClusterStore: ObservableObject {
         do { namespaces = try await client.namespaces() } catch { self.error = error.localizedDescription }
     }
 
+    /// Счётчики основных видов — одним `kubectl get` на вид, только для сайдбара.
+    func loadCounts() async {
+        let wanted = ["pods", "deployments.apps", "statefulsets.apps", "daemonsets.apps", "jobs.batch",
+                      "cronjobs.batch", "services", "ingresses.networking.k8s.io", "configmaps", "secrets",
+                      "persistentvolumeclaims", "nodes", "namespaces"]
+        for id in wanted {
+            guard let k = ResourceKind.find(id), !Task.isCancelled else { continue }
+            if let list = try? await client.list(k, namespace: namespace) { counts[id] = list.count }
+        }
+    }
+
     func refresh() async {
         refreshTask?.cancel()
         let task = Task { [kind, namespace] in
@@ -70,6 +84,7 @@ final class ClusterStore: ObservableObject {
                 let list = try await client.list(kind, namespace: namespace)
                 guard !Task.isCancelled, kind == self.kind, namespace == self.namespace else { return }
                 items = list
+                counts[kind.id] = list.count
                 lastRefresh = Date()
                 if error?.hasPrefix("kubectl") == true { error = nil }
             } catch {

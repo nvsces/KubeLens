@@ -115,6 +115,8 @@ struct ResourceDetail: View {
         return tabs[0].0
     }
 
+    private var tabBinding: Binding<String> { Binding(get: { currentTab }, set: { tab = $0 }) }
+
     /// Вкладки с собственной прокруткой занимают всё окно; остальные — в общем скролле страницы.
     private var fullHeightTab: Bool { ["logs", "yaml", "describe", "events"].contains(currentTab) }
 
@@ -122,21 +124,28 @@ struct ResourceDetail: View {
         Group {
             if fullHeightTab {
                 VStack(alignment: .leading, spacing: 0) {
-                    header
-                    tabBar
+                    VStack(alignment: .leading, spacing: 14) {
+                        header
+                        TabBar(tabs: tabs, selection: tabBinding)
+                    }
+                    .padding(.horizontal, Theme.pagePad).padding(.top, Theme.pagePad).padding(.bottom, 10)
+                    .background(Theme.pageBackground)
                     Divider()
                     content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 16) {
                         header
-                        if isWorkload { summaryCards.padding(.horizontal, 16).padding(.bottom, 12) }
-                        tabBar
-                        Divider()
-                        content.frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
+                        if isWorkload { summaryCards }
+                        VStack(alignment: .leading, spacing: 12) {
+                            TabBar(tabs: tabs, selection: tabBinding)
+                            content.frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
                     }
+                    .padding(.horizontal, Theme.pagePad).padding(.top, Theme.pagePad).padding(.bottom, 28)
                 }
+                .background(Theme.pageBackground)
             }
         }
         .task(id: resource.uid) {
@@ -162,7 +171,7 @@ struct ResourceDetail: View {
         case "pods": WorkloadPods(pods: data.pods, loaded: data.loaded, error: data.error, onOpen: onOpen)
         case "services": RelatedTable(items: data.services, kind: "Service", onOpen: onOpen)
         case "ingresses": RelatedTable(items: data.ingresses, kind: "Ingress", onOpen: onOpen)
-        case "conditions": ConditionsList(conditions: resource.list("status.conditions")).padding(16)
+        case "conditions": ConditionsList(conditions: resource.list("status.conditions"))
         case "config", "overview": OverviewTab(resource: resource)
         case "yaml": YAMLEditorTab(resource: resource)
         case "describe": DescribeTab(resource: resource)
@@ -207,104 +216,108 @@ struct ResourceDetail: View {
     // MARK: Заголовок и сводка
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                (Text("\(resource.kind): ").foregroundStyle(Color.accentColor) + Text(resource.name))
-                    .font(.title).fontWeight(.medium).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
-                let (s, c) = state
-                Text(s).font(.callout).fontWeight(.medium).foregroundStyle(c)
-                    .padding(.horizontal, 10).padding(.vertical, 3).background(c.opacity(0.15), in: Capsule())
-                Spacer()
-                if isWorkload {
-                    Button { tab = "config" } label: { Label("Конфигурация", systemImage: "slider.horizontal.3") }
-                        .buttonStyle(.borderedProminent)
-                    if resource.kind != "Job" && resource.kind != "ReplicaSet" {
-                        Button { store.perform("Перезапуск \(resource.name)") { try await store.client.rolloutRestart(resource) } } label: { Label("Redeploy", systemImage: "arrow.clockwise") }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: kindInfo?.icon ?? "cube")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(kindInfo?.title ?? resource.kind).font(.caption).fontWeight(.medium)
+                        .foregroundStyle(.secondary).textCase(.uppercase)
+                    HStack(spacing: 10) {
+                        Text(resource.name).font(.title2).fontWeight(.semibold)
+                            .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                        StateBadge(text: state.0, color: state.1)
                     }
                 }
-                if resource.kind == "Pod" {
-                    Menu {
-                        ForEach(resource.list("spec.containers").compactMap { $0["name"] as? String }, id: \.self) { c in
-                            Button(c) { do { try store.client.openExecTerminal(pod: resource, container: c) } catch { store.error = error.localizedDescription } }
-                        }
-                    } label: { Label("Shell", systemImage: "terminal") }.fixedSize()
-                    Button { tab = "logs" } label: { Label("Логи", systemImage: "text.alignleft") }
-                }
-                Button { tab = "yaml" } label: { Label("YAML", systemImage: "curlybraces") }
-                Menu {
-                    ResourceActions(resource: resource, confirmDelete: $confirmDelete, onScale: { showScale = true }, onForward: { showForward = true })
-                } label: { Image(systemName: "ellipsis") }.fixedSize()
+                Spacer(minLength: 12)
+                actions
             }
             summaryGrid
         }
-        .padding(16)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if isWorkload {
+                Button { tab = "config" } label: { Label("Конфигурация", systemImage: "slider.horizontal.3") }
+                    .buttonStyle(.borderedProminent)
+                if resource.kind != "Job" && resource.kind != "ReplicaSet" {
+                    Button { store.perform("Перезапуск \(resource.name)") { try await store.client.rolloutRestart(resource) } } label: {
+                        Label("Redeploy", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+            if resource.kind == "Pod" {
+                Menu {
+                    ForEach(resource.list("spec.containers").compactMap { $0["name"] as? String }, id: \.self) { c in
+                        Button(c) { do { try store.client.openExecTerminal(pod: resource, container: c) } catch { store.error = error.localizedDescription } }
+                    }
+                } label: { Label("Shell", systemImage: "terminal") }.fixedSize()
+                Button { tab = "logs" } label: { Label("Логи", systemImage: "text.alignleft") }
+            }
+            Button { tab = "yaml" } label: { Label("YAML", systemImage: "curlybraces") }
+            Menu {
+                ResourceActions(resource: resource, confirmDelete: $confirmDelete, onScale: { showScale = true }, onForward: { showForward = true })
+            } label: { Image(systemName: "ellipsis") }.fixedSize()
+        }
     }
 
     private var summaryGrid: some View {
         let r = resource
-        return HStack(alignment: .top, spacing: 32) {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                if let ns = r.namespace {
-                    GridRow {
-                        Text("Namespace").foregroundStyle(.secondary)
-                        Button { store.namespace = ns } label: { Label(ns, systemImage: "circle.fill").labelStyle(NamespaceLabelStyle()) }.buttonStyle(.link)
+        return HStack(alignment: .top, spacing: 12) {
+            Card {
+                VStack(alignment: .leading, spacing: 7) {
+                    if let ns = r.namespace {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text("Namespace").foregroundStyle(.secondary).frame(width: 130, alignment: .leading)
+                            LinkText(text: ns, bold: false) { store.namespace = ns }
+                            Spacer(minLength: 0)
+                        }.font(.callout)
+                    }
+                    KeyValue(key: "Возраст", value: r.age.isEmpty ? "—" : r.age, keyWidth: 130)
+                    if isWorkload {
+                        KeyValue(key: "Образ", value: r.list("spec.template.spec.containers").compactMap { $0["image"] as? String }.joined(separator: ", "), keyWidth: 130, mono: true)
+                        KeyValue(key: "Рестарты подов", value: "\(data.pods.reduce(0) { $0 + $1.list("status.containerStatuses").reduce(0) { $0 + (($1["restartCount"] as? NSNumber)?.intValue ?? 0) } })", keyWidth: 130)
+                        if r.kind == "DaemonSet" {
+                            KeyValue(key: "Ready", value: "\(r.int("status.numberReady") ?? 0)/\(r.int("status.desiredNumberScheduled") ?? 0)", keyWidth: 130)
+                        } else if r.kind != "Job" {
+                            KeyValue(key: "Ready", value: "\(r.int("status.readyReplicas") ?? 0)/\(r.int("spec.replicas") ?? 0)", keyWidth: 130)
+                            KeyValue(key: "Up-to-date", value: r.str("status.updatedReplicas").isEmpty ? "0" : r.str("status.updatedReplicas"), keyWidth: 130)
+                            KeyValue(key: "Available", value: r.str("status.availableReplicas").isEmpty ? "0" : r.str("status.availableReplicas"), keyWidth: 130)
+                        }
+                    }
+                    if r.kind == "Pod" {
+                        KeyValue(key: "IP", value: r.str("status.podIP"), keyWidth: 130, mono: true)
+                        KeyValue(key: "Узел", value: r.str("spec.nodeName"), keyWidth: 130)
+                        KeyValue(key: "Образ", value: r.list("spec.containers").compactMap { $0["image"] as? String }.joined(separator: ", "), keyWidth: 130, mono: true)
+                    }
+                    if r.kind == "Service" {
+                        KeyValue(key: "Тип", value: r.str("spec.type"), keyWidth: 130)
+                        KeyValue(key: "Cluster IP", value: r.str("spec.clusterIP"), keyWidth: 130, mono: true)
                     }
                 }
-                GridRow { Text("Возраст").foregroundStyle(.secondary); Text(r.age.isEmpty ? "—" : r.age) }
-                if isWorkload {
-                    let imgs = r.list("spec.template.spec.containers").compactMap { $0["image"] as? String }
-                    GridRow { Text("Образ").foregroundStyle(.secondary); Text(imgs.joined(separator: ", ")).textSelection(.enabled).lineLimit(2) }
-                    GridRow { Text("Рестарты подов").foregroundStyle(.secondary); Text("\(data.pods.reduce(0) { $0 + $1.list("status.containerStatuses").reduce(0) { $0 + (($1["restartCount"] as? NSNumber)?.intValue ?? 0) } })") }
-                    if r.kind != "DaemonSet" && r.kind != "Job" {
-                        GridRow { Text("Ready").foregroundStyle(.secondary); Text("\(r.int("status.readyReplicas") ?? 0)/\(r.int("spec.replicas") ?? 0)") }
-                        GridRow { Text("Up-to-date").foregroundStyle(.secondary); Text(r.str("status.updatedReplicas").isEmpty ? "0" : r.str("status.updatedReplicas")) }
-                        GridRow { Text("Available").foregroundStyle(.secondary); Text(r.str("status.availableReplicas").isEmpty ? "0" : r.str("status.availableReplicas")) }
-                    } else if r.kind == "DaemonSet" {
-                        GridRow { Text("Ready").foregroundStyle(.secondary); Text("\(r.int("status.numberReady") ?? 0)/\(r.int("status.desiredNumberScheduled") ?? 0)") }
-                    }
-                }
-                if r.kind == "Pod" {
-                    GridRow { Text("IP").foregroundStyle(.secondary); Text(r.str("status.podIP")).textSelection(.enabled) }
-                    GridRow { Text("Узел").foregroundStyle(.secondary); Text(r.str("spec.nodeName")).textSelection(.enabled) }
-                    GridRow { Text("Образ").foregroundStyle(.secondary); Text(r.list("spec.containers").compactMap { $0["image"] as? String }.joined(separator: ", ")).lineLimit(2).textSelection(.enabled) }
-                }
-                if r.kind == "Service" {
-                    GridRow { Text("Тип").foregroundStyle(.secondary); Text(r.str("spec.type")) }
-                    GridRow { Text("Cluster IP").foregroundStyle(.secondary); Text(r.str("spec.clusterIP")).textSelection(.enabled) }
-                }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack { Text("Labels").foregroundStyle(.secondary); Text("\(r.labels.count)").fontWeight(.medium) }
-                if r.labels.isEmpty { Text("Нет labels.").foregroundStyle(.tertiary) }
-                else { chipList(r.labels) }
+            Card("Labels") {
+                if r.labels.isEmpty { Text("Нет labels").font(.callout).foregroundStyle(.tertiary) }
+                else { FlowLayout(spacing: 5) { ForEach(r.labels.keys.sorted().prefix(10), id: \.self) { Chip(key: $0, value: r.labels[$0] ?? "") } } }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack { Text("Annotations").foregroundStyle(.secondary); Text("\(r.annotations.count)").fontWeight(.medium) }
-                if r.annotations.isEmpty { Text("Нет annotations.").foregroundStyle(.tertiary) }
-                else { chipList(r.annotations, maxValue: 60) }
+            .accessory { Text("\(r.labels.count)").font(.caption).foregroundStyle(.secondary) }
+            .frame(maxWidth: 340)
+            Card("Annotations") {
+                if r.annotations.isEmpty { Text("Нет annotations").font(.callout).foregroundStyle(.tertiary) }
+                else { FlowLayout(spacing: 5) { ForEach(r.annotations.keys.sorted().prefix(6), id: \.self) { Chip(key: $0, value: r.annotations[$0] ?? "", maxValue: 30) } } }
             }
-            .frame(maxWidth: 420, alignment: .leading)
-            Spacer(minLength: 0)
-        }
-        .font(.callout)
-    }
-
-    private func chipList(_ d: [String: String], maxValue: Int = 40) -> some View {
-        FlowLayout(spacing: 6) {
-            ForEach(d.keys.sorted().prefix(12), id: \.self) { k in
-                let v = d[k] ?? ""
-                Text("\(k): \(v.count > maxValue ? String(v.prefix(maxValue)) + "…" : v)")
-                    .font(.system(.caption, design: .monospaced)).lineLimit(1)
-                    .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-                    .help("\(k): \(v)")
-            }
-            if d.count > 12 { Text("+\(d.count - 12)").font(.caption).foregroundStyle(.secondary) }
+            .accessory { Text("\(r.annotations.count)").font(.caption).foregroundStyle(.secondary) }
+            .frame(maxWidth: 380)
         }
     }
 
     private var summaryCards: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             podsCard
             resourcesCard
             insightsCard
@@ -315,21 +328,9 @@ struct ResourceDetail: View {
         let r = resource
         let want = r.int("spec.replicas")
         let groups = Dictionary(grouping: data.pods, by: { ResourceKind.podStatus($0) })
-        return card("Поды") {
-            HStack {
-                Spacer()
-                if let want, r.kind != "ReplicaSet" {
-                    HStack(spacing: 0) {
-                        Button { store.perform("Масштаб \(r.name) → \(want - 1)") { try await store.client.scale(r, replicas: max(want - 1, 0)) } } label: { Image(systemName: "minus") }.disabled(want == 0)
-                        Text("\(want)").font(.title3).fontWeight(.medium).frame(minWidth: 36)
-                        Button { store.perform("Масштаб \(r.name) → \(want + 1)") { try await store.client.scale(r, replicas: want + 1) } } label: { Image(systemName: "plus") }
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        } content: {
+        return Card("Поды", systemImage: "cube") {
             if data.pods.isEmpty {
-                Text(data.loaded ? "Подов нет" : "Загрузка…").foregroundStyle(.secondary)
+                Text(data.loaded ? "Подов нет" : "Загрузка…").font(.callout).foregroundStyle(.tertiary)
             } else {
                 GeometryReader { g in
                     HStack(spacing: 2) {
@@ -338,16 +339,27 @@ struct ResourceDetail: View {
                         }
                     }
                 }
-                .frame(height: 6).clipShape(Capsule())
+                .frame(height: 7).clipShape(Capsule())
                 ForEach(groups.keys.sorted(), id: \.self) { k in
-                    HStack {
-                        Capsule().fill(podColor(k)).frame(width: 18, height: 3)
-                        Text(k)
+                    HStack(spacing: 8) {
+                        Circle().fill(podColor(k)).frame(width: 7, height: 7)
+                        Text(k).font(.callout)
                         Spacer()
-                        Text("\(groups[k]!.count)").padding(.horizontal, 6).background(.quaternary, in: Capsule())
-                        Text(String(format: "%.0f%%", Double(groups[k]!.count) / Double(data.pods.count) * 100)).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
-                    }.font(.callout)
+                        Text("\(groups[k]!.count)").font(.callout).fontWeight(.medium).monospacedDigit()
+                        Text(String(format: "%.0f%%", Double(groups[k]!.count) / Double(data.pods.count) * 100))
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
+                    }
                 }
+            }
+        }
+        .accessory {
+            if let want, r.kind != "ReplicaSet" {
+                HStack(spacing: 2) {
+                    Button { store.perform("Масштаб \(r.name) → \(want - 1)") { try await store.client.scale(r, replicas: max(want - 1, 0)) } } label: { Image(systemName: "minus") }.disabled(want == 0)
+                    Text("\(want)").font(.callout).fontWeight(.semibold).monospacedDigit().frame(minWidth: 26)
+                    Button { store.perform("Масштаб \(r.name) → \(want + 1)") { try await store.client.scale(r, replicas: want + 1) } } label: { Image(systemName: "plus") }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
             }
         }
     }
@@ -381,74 +393,61 @@ struct ResourceDetail: View {
         var seen = Set<String>()
         let unique = refs.filter { seen.insert("\($0.0)/\($0.1)").inserted }
         if let sa = spec["serviceAccountName"] as? String, sa != "default" { seen.insert("sa"); }
-        return card("Ресурсы") { EmptyView() } content: {
-            HStack {
-                Text("Ссылается на").foregroundStyle(.secondary)
-                Spacer()
-                Label("\(unique.count)", systemImage: "circle.fill").labelStyle(NamespaceLabelStyle())
-            }.font(.callout)
-            ForEach(unique.indices, id: \.self) { i in
-                Button {
-                    let (kind, name) = unique[i]
-                    let kid = kind == "ConfigMap" ? "configmaps" : (kind == "Secret" ? "secrets" : "persistentvolumeclaims")
-                    store.kind = ResourceKind.find(kid)!
-                    store.search = name
-                } label: {
-                    HStack { Text(unique[i].0).foregroundStyle(.secondary).frame(width: 80, alignment: .leading); Text(unique[i].1).foregroundStyle(Color.accentColor) }.font(.callout)
-                }.buttonStyle(.plain)
+        return Card("Ресурсы", systemImage: "link") {
+            if unique.isEmpty {
+                Text("Не ссылается на ConfigMap, Secret или PVC").font(.callout).foregroundStyle(.tertiary)
             }
-            if let sa = spec["serviceAccountName"] as? String { HStack { Text("ServiceAccount").foregroundStyle(.secondary).frame(width: 80, alignment: .leading); Text(sa) }.font(.callout) }
+            ForEach(unique.indices, id: \.self) { i in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(unique[i].0).font(.caption).foregroundStyle(.secondary).frame(width: 78, alignment: .leading)
+                    LinkText(text: unique[i].1, bold: false) {
+                        let (kind, name) = unique[i]
+                        let kid = kind == "ConfigMap" ? "configmaps" : (kind == "Secret" ? "secrets" : "persistentvolumeclaims")
+                        store.kind = ResourceKind.find(kid)!
+                        store.search = name
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            if let sa = spec["serviceAccountName"] as? String {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("Account").font(.caption).foregroundStyle(.secondary).frame(width: 78, alignment: .leading)
+                    Text(sa).font(.callout)
+                    Spacer(minLength: 0)
+                }
+            }
         }
+        .accessory { Text("\(unique.count)").font(.caption).foregroundStyle(.secondary) }
     }
 
     private var insightsCard: some View {
         let conds = resource.list("status.conditions")
         let warn = data.events.filter { $0.str("type") == "Warning" }.count
-        return card("Insights") { EmptyView() } content: {
+        let ok = conds.filter { $0["status"] as? String == "True" }.count
+        return Card("Состояние", systemImage: "waveform.path.ecg") {
             HStack {
-                Button("Conditions") { tab = "conditions" }.buttonStyle(.link)
+                LinkText(text: "Conditions", bold: false) { tab = "conditions" }
                 Spacer()
-                Text(conds.map { "\(($0["type"] as? String ?? "").lowercased())" }.joined(separator: " + ")).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.trailing)
-            }.font(.callout)
+                Text(conds.isEmpty ? "—" : "\(ok) из \(conds.count)")
+                    .font(.callout).monospacedDigit()
+                    .foregroundStyle(conds.isEmpty || ok == conds.count ? Color.secondary : Color.orange)
+            }
             HStack {
-                Button("События") { tab = "events" }.buttonStyle(.link)
+                LinkText(text: "События", bold: false) { tab = "events" }
                 Spacer()
-                Text("\(data.events.count)").fontWeight(.medium)
-                if warn > 0 { Text("\(warn) warning").font(.caption).foregroundStyle(.orange) }
-            }.font(.callout)
-            if let img = resource.list("spec.template.spec.containers").first?["image"] as? String, !img.contains(":") || img.hasSuffix(":latest") {
-                Label("Образ без фиксированного тега", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                if warn > 0 { StateBadge(text: "\(warn) warning", color: .orange, compact: true) }
+                else { Text("\(data.events.count)").font(.callout).monospacedDigit().foregroundStyle(.secondary) }
             }
             let strategy = resource.str("spec.strategy.type")
-            if !strategy.isEmpty { HStack { Text("Стратегия").foregroundStyle(.secondary); Spacer(); Text(strategy) }.font(.callout) }
-        }
-    }
-
-    private func card<H: View, C: View>(_ title: String, @ViewBuilder header: () -> H, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack { Text(title).font(.title3).fontWeight(.semibold); header() }
-            content()
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-    }
-
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(tabs, id: \.0) { key, title in
-                Button { tab = key } label: {
-                    Text(title)
-                        .padding(.horizontal, 14).padding(.vertical, 9)
-                        .foregroundStyle(currentTab == key ? Color.accentColor : Color.secondary)
-                        .overlay(alignment: .bottom) { Rectangle().fill(currentTab == key ? Color.accentColor : .clear).frame(height: 2) }
-                }.buttonStyle(.plain)
+            if !strategy.isEmpty {
+                HStack { Text("Стратегия").font(.callout).foregroundStyle(.secondary); Spacer(); Text(strategy).font(.callout) }
             }
-            Spacer()
+            if let img = resource.list("spec.template.spec.containers").first?["image"] as? String, !img.contains(":") || img.hasSuffix(":latest") {
+                Label("Образ без фиксированного тега", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+            }
         }
-        .padding(.horizontal, 8)
     }
+
 }
 
 struct NamespaceLabelStyle: LabelStyle {
@@ -471,7 +470,10 @@ struct ConditionsList: View {
             TableColumn("Message") { Text($0.c["message"] as? String ?? "").lineLimit(2) }
             TableColumn("Updated") { r in Text(((r.c["lastUpdateTime"] ?? r.c["lastTransitionTime"]) as? String).flatMap(KResource.iso.date).map { ageString(since: $0) } ?? "") }.width(ideal: 70)
         }
-        .frame(height: CGFloat(conditions.count) * 28 + 40)
+        .alternatingRowBackgrounds(.enabled)
+        .frame(height: CGFloat(conditions.count) * 30 + 42)
+        .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.radius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.hairline))
     }
     struct Row: Identifiable { let i: Int; let c: [String: Any]; var id: Int { i } }
 }
@@ -499,7 +501,10 @@ struct RelatedTable: View {
                     }.width(min: 40, ideal: col.width ?? 120)
                 }
             }
-            .frame(height: CGFloat(items.count) * 28 + 60)
+            .alternatingRowBackgrounds(.enabled)
+            .frame(height: CGFloat(items.count) * 30 + 44)
+            .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.radius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.hairline))
             .contextMenu(forSelectionType: KResource.ID.self) { ids in
                 if let r = items.first(where: { $0.id == ids.first }) { Button("Открыть") { onOpen(r) } }
             } primaryAction: { ids in if let r = items.first(where: { $0.id == ids.first }) { onOpen(r) } }
@@ -522,25 +527,24 @@ struct WorkloadPods: View {
         else if let error { Text(error).foregroundStyle(.red).padding() }
         else if pods.isEmpty { ContentUnavailableView("Подов нет", systemImage: "cube", description: Text("Ни один под не подходит под селектор нагрузки.")).frame(height: 200) }
         else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Button(role: .destructive) { if let p = pods.first(where: { $0.id == selection }) { confirmDelete = p } } label: { Label("Удалить под", systemImage: "trash") }
-                        .disabled(selection == nil).help("Под пересоздастся контроллером")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
                     if let p = pods.first(where: { $0.id == selection }) {
                         Button { onOpen(p) } label: { Label("Открыть", systemImage: "arrow.right.circle") }
-                        Button { onOpen(p) } label: { Label("Логи", systemImage: "text.alignleft") }
+                        Button(role: .destructive) { confirmDelete = p } label: { Label("Удалить под", systemImage: "trash") }
+                            .help("Под пересоздастся контроллером")
+                    } else {
+                        Text("Выберите под для действий").font(.caption).foregroundStyle(.tertiary)
                     }
                     Spacer()
                 }
-                .padding(.horizontal, 16).padding(.top, 12)
+                .controlSize(.small)
                 Table(pods, selection: $selection) {
                     TableColumn("Статус") { p in
-                        let s = ResourceKind.podStatus(p)
-                        let c: Color = ["Running", "Succeeded"].contains(s) ? .green : (["Pending", "ContainerCreating", "Terminating"].contains(s) ? .orange : .red)
-                        Text(s).font(.caption).fontWeight(.medium).foregroundStyle(c).padding(.horizontal, 8).padding(.vertical, 2).background(c.opacity(0.15), in: Capsule())
+                        StateBadge(text: ResourceKind.podStatus(p), compact: true).padding(.vertical, 5)
                     }.width(ideal: 150)
                     TableColumn("Имя") { p in
-                        Button { onOpen(p) } label: { Text(p.name).fontWeight(.medium).foregroundStyle(Color.accentColor) }.buttonStyle(.plain)
+                        LinkText(text: p.name) { onOpen(p) }
                     }.width(min: 200, ideal: 320)
                     TableColumn("Образ") { p in Text(p.list("spec.containers").compactMap { $0["image"] as? String }.joined(separator: ", ")).foregroundStyle(.secondary).lineLimit(1) }.width(ideal: 260)
                     TableColumn("Ready") { p in
@@ -555,7 +559,10 @@ struct WorkloadPods: View {
                     TableColumn("Узел") { p in Text(p.str("spec.nodeName")).foregroundStyle(.secondary) }.width(ideal: 160)
                     TableColumn("Возраст") { p in Text(p.age).foregroundStyle(.secondary) }.width(ideal: 70)
                 }
-                .frame(height: CGFloat(pods.count) * 30 + 60)
+                .alternatingRowBackgrounds(.enabled)
+                .frame(height: CGFloat(pods.count) * 32 + 44)
+                .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.radius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.hairline))
                 .contextMenu(forSelectionType: KResource.ID.self) { ids in
                     if let p = pods.first(where: { $0.id == ids.first }) {
                         Button("Открыть") { onOpen(p) }
@@ -586,7 +593,7 @@ struct OverviewTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 kindSpecific
                 if !resource.labels.isEmpty {
                     section("Labels") { chips(resource.labels) }
@@ -609,7 +616,7 @@ struct OverviewTab: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(.vertical, 2)
         }
     }
 
@@ -762,37 +769,25 @@ struct OverviewTab: View {
     // MARK: Кирпичики
 
     @ViewBuilder
-    private func section<C: View>(_ title: String, toggle: Binding<Bool>? = nil, toggleTitle: String? = nil, @ViewBuilder _ content: () -> C) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 6) { content() }.frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            HStack {
-                Text(title).font(.headline)
-                Spacer()
-                if let toggle {
-                    Toggle(toggleTitle ?? "Показать", isOn: toggle).toggleStyle(.switch).controlSize(.mini)
-                }
+    private func section<C: View>(_ title: String, toggle: Binding<Bool>? = nil, toggleTitle: String? = nil, @ViewBuilder _ content: @escaping () -> C) -> some View {
+        Card(title) {
+            VStack(alignment: .leading, spacing: 7) { content() }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessory {
+            if let toggle {
+                Toggle(toggleTitle ?? "Показать", isOn: toggle).toggleStyle(.switch).controlSize(.mini)
             }
         }
     }
 
     @ViewBuilder
     private func row(_ k: String, _ v: String) -> some View {
-        if !v.isEmpty {
-            HStack(alignment: .top) {
-                Text(k).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
-                Text(v).textSelection(.enabled)
-            }.font(.callout)
-        }
+        KeyValue(key: k, value: v)
     }
 
     private func chips(_ d: [String: String]) -> some View {
-        FlowLayout(spacing: 6) {
-            ForEach(d.keys.sorted(), id: \.self) { k in
-                Text("\(k)=\(d[k] ?? "")").font(.system(.caption, design: .monospaced))
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-                    .textSelection(.enabled)
-            }
+        FlowLayout(spacing: 5) {
+            ForEach(d.keys.sorted(), id: \.self) { k in Chip(key: k, value: d[k] ?? "", maxValue: 60) }
         }
     }
 
@@ -808,14 +803,17 @@ struct OverviewTab: View {
     }
 
     private func conditions(_ conds: [[String: Any]]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             ForEach(conds.indices, id: \.self) { i in
                 let c = conds[i]
                 let ok = c["status"] as? String == "True"
-                HStack(alignment: .top) {
-                    Image(systemName: ok ? "checkmark.circle.fill" : "minus.circle").foregroundStyle(ok ? Color.green : Color.secondary)
-                    Text(c["type"] as? String ?? "").frame(width: 150, alignment: .leading)
-                    Text([c["reason"] as? String, c["message"] as? String].compactMap { $0 }.joined(separator: ": ")).foregroundStyle(.secondary).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: ok ? "checkmark.circle.fill" : "minus.circle")
+                        .foregroundStyle(ok ? Color.green : Color.secondary).font(.caption)
+                    Text(c["type"] as? String ?? "").frame(width: 142, alignment: .leading)
+                    Text([c["reason"] as? String, c["message"] as? String].compactMap { $0 }.joined(separator: ": "))
+                        .foregroundStyle(.secondary).lineLimit(2)
+                    Spacer(minLength: 0)
                 }.font(.callout)
             }
         }
@@ -835,12 +833,12 @@ struct PodContainers: View {
                 let st = statuses.first { $0["name"] as? String == name }
                 let state = (st?["state"] as? [String: Any]) ?? [:]
                 let (stateText, color) = containerState(state)
-                HStack(alignment: .top, spacing: 8) {
-                    Circle().fill(color).frame(width: 8, height: 8).padding(.top, 5)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
+                HStack(alignment: .top, spacing: 9) {
+                    Circle().fill(color).frame(width: 8, height: 8).padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 7) {
                             Text(name).fontWeight(.medium)
-                            if isInit { Text("init").font(.caption2).padding(.horizontal, 4).background(.quaternary, in: Capsule()) }
+                            if isInit { Text("init").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 1).background(Color.secondary.opacity(0.14), in: Capsule()) }
                             Text(stateText).font(.caption).foregroundStyle(color)
                             if let rc = (st?["restartCount"] as? NSNumber)?.intValue, rc > 0 { Text("рестартов: \(rc)").font(.caption).foregroundStyle(.orange) }
                         }

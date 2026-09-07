@@ -55,8 +55,13 @@ struct ClusterView: View {
         .onChange(of: kindSelection) { _, id in if let id, let k = ResourceKind.find(id) { store.kind = k } }
         .overlay(alignment: .bottom) {
             if let notice = store.notice {
-                Text(notice).font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule()).padding(.bottom, 12)
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .font(.callout).foregroundStyle(.primary)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.hairline))
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                    .padding(.bottom, 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .task(id: notice) {
                         try? await Task.sleep(for: .seconds(3))
@@ -69,32 +74,52 @@ struct ClusterView: View {
     private var sidebar: some View {
         List(selection: $kindSelection) {
             ForEach(ResourceKind.groups, id: \.self) { group in
-                Section(group) {
+                Section {
                     ForEach(ResourceKind.all.filter { $0.group == group }) { k in
-                        Label(k.title, systemImage: k.icon).tag(k.id)
+                        HStack(spacing: 8) {
+                            Image(systemName: k.icon).frame(width: 18).foregroundStyle(kindSelection == k.id ? Color.accentColor : Color.secondary)
+                            Text(k.title)
+                            Spacer(minLength: 4)
+                            if let n = store.counts[k.id] {
+                                Text("\(n)").font(.caption).monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                            }
+                        }
+                        .padding(.vertical, 1)
+                        .tag(k.id)
                     }
+                } header: {
+                    Text(group).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
                 }
             }
             if !store.forwards.isEmpty {
-                Section("Port-forward") {
+                Section {
                     ForEach(store.forwards) { f in ForwardRow(forward: f) }
+                } header: {
+                    Text("Port-forward").font(.caption).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
                 }
             }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button {
-                    do { try store.client.openShellTerminal(namespace: store.namespace) } catch { store.error = error.localizedDescription }
-                } label: { Label("Terminal", systemImage: "terminal") }
-                .buttonStyle(.borderless).help("Открыть Terminal с этим контекстом")
-                Spacer()
-                if let busy = store.busy {
-                    ProgressView().controlSize(.small)
-                    Text(busy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            VStack(spacing: 0) {
+                Divider()
+                HStack(spacing: 8) {
+                    Button {
+                        do { try store.client.openShellTerminal(namespace: store.namespace) } catch { store.error = error.localizedDescription }
+                    } label: { Label("Terminal", systemImage: "terminal").font(.callout) }
+                    .buttonStyle(.borderless).help("Открыть Terminal с этим контекстом")
+                    Spacer()
+                    if let busy = store.busy {
+                        ProgressView().controlSize(.small)
+                        Text(busy).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    }
                 }
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .padding(8).background(.bar)
+            .background(.bar)
         }
     }
 }
@@ -108,8 +133,8 @@ struct ForwardRow: View {
             Image(systemName: forward.running ? "arrow.left.arrow.right.circle.fill" : "arrow.left.arrow.right.circle")
                 .foregroundStyle(forward.running ? Color.green : Color.secondary)
             VStack(alignment: .leading, spacing: 1) {
-                Text(forward.title).lineLimit(1)
-                Text(forward.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(forward.title).font(.callout).lineLimit(1).truncationMode(.middle)
+                Text(forward.status).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             Button { store.removeForward(forward) } label: { Image(systemName: "xmark.circle") }.buttonStyle(.borderless)
@@ -133,12 +158,13 @@ struct ResourceTable: View {
         Table(store.filtered, selection: $store.selection) {
             TableColumnForEach(store.kind.columns) { col in
                 TableColumn(col.title) { (r: KResource) in
-                    cell(col, r)
+                    cell(col, r).padding(.vertical, 5)
                 }
                 .width(min: 40, ideal: col.width ?? 120)
             }
         }
         .id(store.kind.id + (store.namespace ?? "*"))
+        .alternatingRowBackgrounds(.enabled)
         .contextMenu(forSelectionType: KResource.ID.self) { ids in
             if let id = ids.first, let r = store.items.first(where: { $0.id == id }) {
                 Button("Открыть") { onOpen(r) }
@@ -170,27 +196,19 @@ struct ResourceTable: View {
     @ViewBuilder
     private func cell(_ col: ResourceColumn, _ r: KResource) -> some View {
         let v = col.value(r)
-        if col.title == "Статус" || col.title == "Тип" && r.kind == "Event" {
-            Text(v).foregroundStyle(statusColor(v)).fontWeight(statusColor(v) == .primary ? .regular : .medium)
-        } else if col.title == "Имя" {
-            // Имя — ссылка на страницу объекта, как в Rancher.
-            Button { onOpen(r) } label: {
-                Text(v).fontWeight(.medium).foregroundStyle(Color.accentColor).underline(false)
-            }
-            .buttonStyle(.plain).onHover { if $0 { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
-        } else {
-            Text(v).foregroundStyle(col.title == "Возраст" || col.title == "Namespace" ? .secondary : .primary)
-        }
-    }
-
-    private func statusColor(_ s: String) -> Color {
-        switch s {
-        case "Running", "Ready", "Bound", "Active", "Complete", "Succeeded", "Available", "Normal": return .green
-        case "Pending", "ContainerCreating", "PodInitializing", "Terminating", "Released", "Warning": return .orange
-        case "": return .primary
+        switch col.title {
+        case "Статус":
+            if v.isEmpty { Text("") } else { StateBadge(text: v, compact: true) }
+        case "Тип" where r.kind == "Event":
+            StateBadge(text: v, color: v == "Warning" ? .orange : .secondary, compact: true)
+        case "Имя":
+            LinkText(text: v) { onOpen(r) }
+        case "Возраст", "Namespace", "Узел", "IP", "Образы", "Ключи":
+            Text(v).foregroundStyle(.secondary)
+        case "Ready", "Рестарты":
+            Text(v).monospacedDigit().foregroundStyle(v.hasPrefix("0") && v.count == 1 ? .secondary : .primary)
         default:
-            if s.hasPrefix("Init:") || s.contains("Ready,") { return .orange }
-            return ["Failed", "Error", "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "OOMKilled", "NotReady", "Evicted", "Unknown", "Lost"].contains(where: s.contains) ? .red : .primary
+            Text(v)
         }
     }
 
@@ -209,12 +227,13 @@ struct ResourceTable: View {
             }
         }
         ToolbarItemGroup {
-            Text(store.lastRefresh.map { "\(store.items.count) · \(Self.time.string(from: $0))" } ?? "")
+            if store.loading { ProgressView().controlSize(.small) }
+            Text(store.lastRefresh.map { "обновлено \(Self.time.string(from: $0))" } ?? "")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             Button { Task { await store.refresh() } } label: { Label("Обновить", systemImage: "arrow.clockwise") }
                 .keyboardShortcut("r").disabled(store.loading)
             Toggle(isOn: $store.autoRefresh) { Label("Авто", systemImage: "arrow.triangle.2.circlepath") }
-                .help("Автообновление каждые несколько секунд")
+                .help("Автообновление каждые \(Int(store.refreshInterval)) с")
             Button { showCreate = true } label: { Label("Создать", systemImage: "plus") }
                 .help("Создать объект из YAML")
         }
