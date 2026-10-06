@@ -58,12 +58,45 @@ sudo mv kubectl /usr/local/bin/kubectl
 Версия kubectl должна отличаться от версии кластера не более чем на один минорный выпуск —
 это [требование самого Kubernetes](https://kubernetes.io/releases/version-skew-policy/).
 
+## Плагины авторизации
+
+Облачные кластеры часто выдают токен не из kubeconfig, а через внешнюю программу (exec-плагин):
+kubectl запускает её перед каждым запросом. Такую программу нужно поставить отдельно, иначе
+kubectl не сможет подключиться ни в терминале, ни в KubeLens.
+
+Какой плагин нужен контексту, видно в карточке контекста на вкладке «Пользователь»
+(тип «Внешняя команда (exec)» и сама команда) или в файле: `users[].user.exec.command`.
+
+| Кластер | Команда в kubeconfig | Установка | После установки |
+|---|---|---|---|
+| DigitalOcean (токен или SSO) | `doctl` | `brew install doctl` | для SSO — ничего, вход откроется в браузере |
+| Google GKE | `gke-gcloud-auth-plugin` | `brew install --cask gcloud-cli`, затем `gcloud components install gke-gcloud-auth-plugin` | `gcloud auth login` |
+| Amazon EKS | `aws` | `brew install awscli` | `aws configure` или `aws sso login --profile …` |
+| Amazon EKS (старые конфиги) | `aws-iam-authenticator` | `brew install aws-iam-authenticator` | учётные данные AWS, как для `aws` |
+| Azure AKS (Entra ID) | `kubelogin` | `brew install Azure/kubelogin/kubelogin` | `az login` или вход в браузере |
+| OIDC: Keycloak, Dex и др. (`kubectl oidc-login`) | `kubectl` с аргументом `oidc-login` | `brew install kubelogin` | ничего, вход откроется в браузере |
+
+Плагин ищется там же, где kubectl: в `PATH` логин-шелла, `/opt/homebrew/bin` и `/usr/local/bin`.
+Проверить, что всё работает, проще всего в терминале — `kubectl --context <контекст> get ns`.
+
+Как KubeLens работает с плагинами:
+
+- При открытии окна кластера или по кнопке «Проверить связь» приложение один раз запускает плагин
+  контекста. Если нужен вход в браузере, плагин откроет его сам, а над таблицей появится полоса
+  «Вход через …» со ссылкой на страницу входа и кнопкой «Отмена». На вход даётся 5 минут.
+- Пока идёт вход, остальные запросы ждут его, а затем kubectl берёт токен из кэша плагина.
+  Когда срок токена истекает, вход повторяется так же.
+- Если плагин не установлен, полоса покажет команду установки и кнопку «Установить в Терминале».
+- Если вход не удался, приложение само его не повторяет — нажмите «Войти». Плагинам, которые
+  спрашивают что-то с клавиатуры (`interactiveMode: Always`), нужна кнопка «В Терминале»:
+  войдите там, и приложение подхватит токен из кэша плагина.
+
 ## Сборка из исходников
 
 ```bash
 ./make_app.sh && open KubeLens.app          # локальная сборка, ad-hoc подпись
-./make_dmg.sh 0.1.1                          # DMG с Developer ID и нотаризацией
-./make_dmg.sh 0.1.1 --no-notarize            # только подпись
+./make_dmg.sh 0.1.2                          # DMG с Developer ID и нотаризацией
+./make_dmg.sh 0.1.2 --no-notarize            # только подпись
 python3 gen_project.py                       # пересобрать .xcodeproj после добавления файлов
 ```
 
@@ -140,6 +173,7 @@ namespace) → детали. В деталях:
 
 Весь обмен с кластером идёт через `kubectl` (`get -o json`, `apply -f -`, `logs -f`, `port-forward`…):
 так работают любые способы аутентификации из kubeconfig — exec-плагины облаков, OIDC, сертификаты.
+Для exec-плагинов сам плагин тоже должен быть установлен — см. [Плагины авторизации](#плагины-авторизации).
 
 ## Как это устроено
 
