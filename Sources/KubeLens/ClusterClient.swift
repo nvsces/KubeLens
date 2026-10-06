@@ -16,7 +16,7 @@ final class ClusterClient: @unchecked Sendable {
     init(target: ClusterTarget) { self.target = target }
 
     func run(_ args: [String], input: Data? = nil, timeout: TimeInterval = 20) async throws -> String {
-        try await Kubectl.shared.run(["--context", target.context] + args, kubeconfig: target.kubeconfig, input: input, timeout: timeout)
+        try await Kubectl.shared.run(context: target.context, args, kubeconfig: target.kubeconfig, input: input, timeout: timeout)
     }
 
     private func nsArgs(_ kind: ResourceKind, _ namespace: String?) -> [String] {
@@ -151,6 +151,32 @@ final class ClusterClient: @unchecked Sendable {
         exec ${SHELL:-/bin/zsh} -i
         """
         try openInTerminal(script: script, name: "shell-\(target.context)")
+    }
+
+    /// Вход для плагинов, которым нужен настоящий терминал: kubectl запускает плагин
+    /// с доступом к вводу, плагин кладёт токен в свой кэш, дальше его берёт приложение.
+    func openSignInTerminal() throws {
+        guard let exe = Kubectl.shared.executable else { throw SubprocessError.notFound("kubectl") }
+        try openCommandTerminal("""
+        echo "Вход в \(target.context)…"
+        \(shellQuote(exe)) --context \(shellQuote(target.context)) version && echo && echo "Готово — вернитесь в KubeLens."
+        """, name: "login-\(target.context)")
+    }
+
+    /// Установка недостающего плагина авторизации (например, `brew install doctl`).
+    func openInstallTerminal(_ command: String) throws {
+        try openCommandTerminal("\(command) && echo && echo \"Готово — вернитесь в KubeLens и нажмите «Проверить снова».\"", name: "install")
+    }
+
+    private func openCommandTerminal(_ body: String, name: String) throws {
+        let script = """
+        #!/bin/bash
+        export KUBECONFIG=\(shellQuote(target.kubeconfig))
+        export PATH=\(shellQuote(Kubectl.shared.searchPath))
+        printf '\\033]0;%s\\007' \(shellQuote(target.context))
+        \(body)
+        """
+        try openInTerminal(script: script, name: name)
     }
 
     private func openInTerminal(script: String, name: String) throws {

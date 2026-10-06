@@ -35,6 +35,9 @@ struct ClusterView: View {
                         ResourcePage(initial: r, onOpen: { path.append($0) })
                     }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                AuthBanner(key: store.authKey) { Task { await store.reload() } }
+            }
         }
         .onChange(of: store.kind) { _, _ in path = [] }
         .task {

@@ -17,11 +17,13 @@ struct ContextDetail: View {
     @Environment(\.openWindow) private var openWindow
 
     private var isCurrent: Bool { store.currentContext?.context.name == context.name && store.currentContext?.file.id == file.id }
+    private var authKey: AuthKey { AuthKey(context: context.name, kubeconfig: store.kubeconfigEnv(for: file)) }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            AuthBanner(key: authKey) { Task { await runProbe() } }
             Picker("", selection: $tab) {
                 Text("Контекст").tag(0)
                 Text("Кластер").tag(1)
@@ -106,7 +108,12 @@ struct ContextDetail: View {
     private func runProbe() async {
         probing = true; probe = nil; probeError = nil
         defer { probing = false }
-        do { probe = try await Kubectl.shared.probe(context: context.name, kubeconfig: store.kubeconfigEnv(for: file)) }
+        do {
+            // Проверка связи — заодно и повторный вход, если прошлый не удался.
+            try await ClusterAuth.shared.signIn(authKey)
+            probe = try await Kubectl.shared.probe(context: context.name, kubeconfig: store.kubeconfigEnv(for: file))
+        }
+        catch is AuthError {}   // причину показывает полоса входа
         catch { probeError = error.localizedDescription }
     }
 

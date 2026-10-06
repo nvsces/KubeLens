@@ -35,12 +35,17 @@ final class ClusterStore: ObservableObject {
         self.target = target
         client = ClusterClient(target: target)
         namespace = target.namespace
-        Task {
-            await loadNamespaces()
-            await refresh()
-            await loadCounts()
-        }
+        Task { await reload() }
         startTimer()
+    }
+
+    var authKey: AuthKey { AuthKey(context: target.context, kubeconfig: target.kubeconfig) }
+
+    /// Всё, что окно грузит при открытии; повторяется после входа по кнопке.
+    func reload() async {
+        await loadNamespaces()
+        await refresh()
+        await loadCounts()
     }
 
     var filtered: [KResource] {
@@ -61,7 +66,7 @@ final class ClusterStore: ObservableObject {
     }
 
     func loadNamespaces() async {
-        do { namespaces = try await client.namespaces() } catch { self.error = error.localizedDescription }
+        do { namespaces = try await client.namespaces() } catch { if !(error is AuthError) { self.error = error.localizedDescription } }
     }
 
     /// Счётчики основных видов — одним `kubectl get` на вид, только для сайдбара.
@@ -88,7 +93,8 @@ final class ClusterStore: ObservableObject {
                 lastRefresh = Date()
                 if error?.hasPrefix("kubectl") == true { error = nil }
             } catch {
-                if !Task.isCancelled { self.error = error.localizedDescription }
+                // Ошибку входа показывает полоса над таблицей, алерт на каждое автообновление не нужен.
+                if !Task.isCancelled, !(error is AuthError) { self.error = error.localizedDescription }
             }
         }
         refreshTask = task

@@ -37,16 +37,28 @@ enum SubprocessError: LocalizedError {
         switch self {
         case .timeout(let cmd): return "\(cmd): превышено время ожидания"
         case .failed(let cmd, let code, let err):
-            let tail = err.split(separator: "\n").last.map(String.init) ?? ""
-            return "\(cmd) завершился с кодом \(code)\(tail.isEmpty ? "" : ": \(tail)")"
+            let line = Self.summary(err)
+            return "\(cmd) завершился с кодом \(code)\(line.isEmpty ? "" : ": \(line)")"
         case .notFound(let cmd): return "\(cmd) не найден. Укажите путь в настройках."
         }
+    }
+
+    /// Первая содержательная строка stderr. kubectl перед ошибкой пишет строки журнала
+    /// (`E1006 12:00:00.000000 …`) и предупреждения, а после неё — справку со ссылкой.
+    static func summary(_ stderr: String) -> String {
+        let lines = stderr.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let noise: (String) -> Bool = { l in
+            l.isEmpty || l.hasPrefix("Warning:") || l.range(of: #"^[IWEF]\d{4} \d"#, options: .regularExpression) != nil
+        }
+        return lines.first { !noise($0) } ?? lines.last { !$0.isEmpty } ?? ""
     }
 }
 
 enum Subprocess {
     /// Запуск с таймаутом; stdout/stderr читаются целиком в фоне, чтобы процесс не завис на полном pipe.
-    static func run(_ executable: String, _ args: [String], env: [String: String] = [:], input: Data? = nil, timeout: TimeInterval) async throws -> SubprocessResult {
+    /// Отмена задачи завершает процесс. `onStderr` получает stderr построчно, пока процесс работает.
+    static func run(_ executable: String, _ args: [String], env: [String: String] = [:], input: Data? = nil, timeout: TimeInterval,
+                    onStderr: (@Sendable (String) -> Void)? = nil) async throws -> SubprocessResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
@@ -68,38 +80,74 @@ enum Subprocess {
         }
 
         let state = RunState()
-        return try await withCheckedThrowingContinuation { cont in
-            let group = DispatchGroup()
-            group.enter(); group.enter()
-            DispatchQueue.global().async { let d = out.fileHandleForReading.readDataToEndOfFile(); state.lock.withLock { state.out = d }; group.leave() }
-            DispatchQueue.global().async { let d = err.fileHandleForReading.readDataToEndOfFile(); state.lock.withLock { state.err = d }; group.leave() }
-            proc.terminationHandler = { p in
-                group.wait()
-                guard state.finish() else { return }
-                cont.resume(returning: SubprocessResult(status: p.terminationStatus,
-                                                        stdout: String(decoding: state.out, as: UTF8.self),
-                                                        stderr: String(decoding: state.err, as: UTF8.self)))
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                state.lock.withLock { state.cont = cont }
+                if Task.isCancelled { state.take()?.resume(throwing: CancellationError()); return }
+                let group = DispatchGroup()
+                group.enter(); group.enter()
+                DispatchQueue.global().async { let d = out.fileHandleForReading.readDataToEndOfFile(); state.lock.withLock { state.out = d }; group.leave() }
+                DispatchQueue.global().async {
+                    let d = readLines(err.fileHandleForReading, onStderr)
+                    state.lock.withLock { state.err = d }
+                    group.leave()
+                }
+                proc.terminationHandler = { p in
+                    group.wait()
+                    state.take()?.resume(returning: SubprocessResult(status: p.terminationStatus,
+                                                                     stdout: String(decoding: state.out, as: UTF8.self),
+                                                                     stderr: String(decoding: state.err, as: UTF8.self)))
+                }
+                do { try proc.run() } catch {
+                    state.take()?.resume(throwing: error)
+                    return
+                }
+                // Отмена могла прийти между сохранением continuation и запуском.
+                if state.lock.withLock({ state.abandoned }) { proc.terminate() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    state.abandon(proc, SubprocessError.timeout(URL(fileURLWithPath: executable).lastPathComponent))
+                }
             }
-            do { try proc.run() } catch {
-                _ = state.finish()
-                cont.resume(throwing: error)
-                return
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                guard state.finish() else { return }
-                proc.terminate()
-                cont.resume(throwing: SubprocessError.timeout(URL(fileURLWithPath: executable).lastPathComponent))
-            }
+        } onCancel: {
+            state.abandon(proc, CancellationError())
         }
     }
 
-    /// Общее состояние обработчиков завершения и таймаута: continuation можно резюмировать один раз.
+    /// Читает до конца, по пути отдавая готовые строки в `onLine`.
+    private static func readLines(_ h: FileHandle, _ onLine: (@Sendable (String) -> Void)?) -> Data {
+        guard let onLine else { return h.readDataToEndOfFile() }
+        var all = Data(), pending = Data()
+        while case let chunk = h.availableData, !chunk.isEmpty {
+            all.append(chunk)
+            pending.append(chunk)
+            while let nl = pending.firstIndex(of: 0x0A) {
+                onLine(String(decoding: pending[..<nl], as: UTF8.self))
+                pending.removeSubrange(...nl)
+            }
+        }
+        if !pending.isEmpty { onLine(String(decoding: pending, as: UTF8.self)) }
+        return all
+    }
+
+    /// Общее состояние обработчиков завершения, таймаута и отмены: continuation резюмируется один раз.
     private final class RunState: @unchecked Sendable {
         let lock = NSLock()
-        var finished = false
+        var cont: CheckedContinuation<SubprocessResult, Error>?
+        var abandoned = false
         var out = Data()
         var err = Data()
-        func finish() -> Bool { lock.withLock { if finished { return false }; finished = true; return true } }
+
+        func take() -> CheckedContinuation<SubprocessResult, Error>? {
+            lock.withLock { defer { cont = nil }; return cont }
+        }
+
+        /// Таймаут или отмена: процесс завершаем, ждущему отдаём ошибку.
+        func abandon(_ proc: Process, _ error: Error) {
+            guard let c = take() else { return }
+            lock.withLock { abandoned = true }
+            if proc.isRunning { proc.terminate() }
+            c.resume(throwing: error)
+        }
     }
 }
 
@@ -123,15 +171,17 @@ final class Kubectl: @unchecked Sendable {
         return nil
     }
 
-    func run(_ args: [String], kubeconfig: String, input: Data? = nil, timeout: TimeInterval = 20) async throws -> String {
+    /// Перед вызовом — вход через exec-плагин контекста, если он нужен (см. `ClusterAuth`).
+    func run(context: String, _ args: [String], kubeconfig: String, input: Data? = nil, timeout: TimeInterval = 20) async throws -> String {
         guard let exe = executable else { throw SubprocessError.notFound("kubectl") }
-        let r = try await Subprocess.run(exe, args, env: ["KUBECONFIG": kubeconfig, "PATH": searchPath], input: input, timeout: timeout)
+        try await ClusterAuth.shared.ensure(AuthKey(context: context, kubeconfig: kubeconfig))
+        let r = try await Subprocess.run(exe, ["--context", context] + args, env: ["KUBECONFIG": kubeconfig, "PATH": searchPath], input: input, timeout: timeout)
         guard r.status == 0 else { throw SubprocessError.failed("kubectl", r.status, r.stderr) }
         return r.stdout
     }
 
     func namespaces(context: String, kubeconfig: String) async throws -> [String] {
-        let out = try await run(["--context", context, "get", "namespaces", "-o", "name", "--request-timeout=10s"], kubeconfig: kubeconfig)
+        let out = try await run(context: context, ["get", "namespaces", "-o", "name", "--request-timeout=10s"], kubeconfig: kubeconfig)
         return out.split(separator: "\n").map { String($0).replacingOccurrences(of: "namespace/", with: "") }.sorted()
     }
 
@@ -143,7 +193,7 @@ final class Kubectl: @unchecked Sendable {
     /// `kubectl version` — самый дешёвый запрос, который проверяет адрес, TLS и аутентификацию.
     func probe(context: String, kubeconfig: String) async throws -> Probe {
         let start = Date()
-        let out = try await run(["--context", context, "version", "-o", "json", "--request-timeout=10s"], kubeconfig: kubeconfig)
+        let out = try await run(context: context, ["version", "-o", "json", "--request-timeout=10s"], kubeconfig: kubeconfig)
         let elapsed = Date().timeIntervalSince(start)
         let json = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any]
         let ver = (json?["serverVersion"] as? [String: Any])?["gitVersion"] as? String ?? "?"
